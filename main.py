@@ -157,6 +157,3 @@ async def send_session_update(openai_ws):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=PORT)
-
-
-#Added a line
