@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.websockets import WebSocketDisconnect
 from twilio.twiml.voice_response import VoiceResponse, Connect, Say, Stream
 from dotenv import load_dotenv
+from tools import tools, search_web_serper
 
 load_dotenv()
 
@@ -15,16 +16,17 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY') # requires OpenAI Realtime API Access
 PORT = int(os.getenv('PORT', 5050))
 SYSTEM_MESSAGE = (
-    "You are a helpful and bubbly AI assistant who loves to chat about "
-    "anything the user is interested in and is prepared to offer them facts. "
-    "You have a penchant for dad jokes, owl jokes, and rickrolling – subtly. "
-    "Always stay positive, but work in a joke when appropriate."
+    "You are a helpful assistant with capabilities to search the web with search_web_serper tool"
 )
 VOICE = 'alloy'
 LOG_EVENT_TYPES = [
-    'response.content.done', 'rate_limits.updated', 'response.done',
-    'input_audio_buffer.committed', 'input_audio_buffer.speech_stopped',
-    'input_audio_buffer.speech_started', 'session.created'
+    'response.content.done',
+    # 'rate_limits.updated',
+    'response.done',
+    # 'input_audio_buffer.committed',
+    # 'input_audio_buffer.speech_stopped',
+    # 'input_audio_buffer.speech_started',
+    'session.created'
 ]
 
 app = FastAPI()
@@ -42,7 +44,7 @@ async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
     response = VoiceResponse()
     # <Say> punctuation to improve text-to-speech flow
-    response.say("Please wait while we connect your call to the A. I. voice assistant, powered by Twilio and the Open-A.I. Realtime API")
+    # response.say("Please wait while we connect your call to the A. I. voice assistant, powered by Twilio and the Open-A.I. Realtime API")
     response.pause(length=1)
     response.say("O.K. you can start talking!")
     host = request.url.hostname
@@ -93,11 +95,25 @@ async def handle_media_stream(websocket: WebSocket):
             try:
                 async for openai_message in openai_ws:
                     response = json.loads(openai_message)
-                    if response['type'] in LOG_EVENT_TYPES:
-                        print(f"Received event: {response['type']}", response)
-                    if response['type'] == 'session.updated':
+                    session_type = response.get('type')
+                    print(f"-----------session type : {session_type}-------------")
+                    if session_type == 'conversation.item.created':
+                        print("Conversation item created:", response)
+                    if session_type == 'response.created':
+                        print("Response created:", response)
+                    if session_type == 'response.function_call_arguments.delta':
+                        print("Arguments delta:", response)
+                    if session_type == 'response.output_item.added':
+                        print("Output item added:", response)
+                    if session_type == 'response.output_item.done':
+                        print("Output item done:", response)
+                    if session_type == 'error':
+                        print(f"Received error: {response['error']}")
+                    if session_type in LOG_EVENT_TYPES:
+                        print(f"Received event: {session_type}", response)
+                    if session_type == 'session.updated':
                         print("Session updated successfully:", response)
-                    if response['type'] == 'response.audio.delta' and response.get('delta'):
+                    if session_type == 'response.audio.delta' and response.get('delta'):
                         # Audio from OpenAI
                         try:
                             audio_payload = base64.b64encode(base64.b64decode(response['delta'])).decode('utf-8')
@@ -111,10 +127,27 @@ async def handle_media_stream(websocket: WebSocket):
                             await websocket.send_json(audio_delta)
                         except Exception as e:
                             print(f"Error processing audio data: {e}")
+                    if session_type == 'response.output_item.done':
+                        session_item = response["item"]
+                        if session_item["type"] == "function_call":
+                            if session_item["name"] == "search_web_serper":
+                                query = json.loads(session_item["arguments"])["query"]
+                                search_results = await search_web_serper(query)
+                                await openai_ws.send(json.dumps({
+                                    'type': 'conversation.item.create',
+                                    'item': {
+                                        'type': 'function_call_output',
+                                        'call_id': session_item['call_id'],
+                                        'output': json.dumps(search_results)
+                                    }
+                                }))
+                                await openai_ws.send(json.dumps({ 'type': 'response.create' }))
             except Exception as e:
                 print(f"Error in send_to_twilio: {e}")
 
         await asyncio.gather(receive_from_twilio(), send_to_twilio())
+
+
 
 async def send_session_update(openai_ws):
     """Send session update to OpenAI WebSocket."""
@@ -128,10 +161,12 @@ async def send_session_update(openai_ws):
             "instructions": SYSTEM_MESSAGE,
             "modalities": ["text", "audio"],
             "temperature": 0.8,
+            "tools": tools
         }
     }
     print('Sending session update:', json.dumps(session_update))
     await openai_ws.send(json.dumps(session_update))
+
 
 if __name__ == "__main__":
     import uvicorn

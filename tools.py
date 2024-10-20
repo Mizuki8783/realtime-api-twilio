@@ -24,6 +24,7 @@ async def search_web_serper(query):
 
 
 tools = [{
+    "type": "function",
     "name": "search_web_serper",
     "description": "Searches the web using the Serper API for the given query and returns the search results.",
     "parameters": {
@@ -35,7 +36,6 @@ tools = [{
             },
         },
         "required": ["query"],
-        "additionalProperties": False,
         }
     }
 ]
