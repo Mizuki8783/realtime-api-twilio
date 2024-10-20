@@ -4,7 +4,7 @@ import base64
 import asyncio
 import websockets
 from fastapi import FastAPI, WebSocket, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.websockets import WebSocketDisconnect
 from twilio.twiml.voice_response import VoiceResponse, Connect, Say, Stream
 from dotenv import load_dotenv
@@ -20,13 +20,11 @@ SYSTEM_MESSAGE = (
 )
 VOICE = 'alloy'
 LOG_EVENT_TYPES = [
+    'session.created',
     'response.content.done',
-    # 'rate_limits.updated',
     'response.done',
-    # 'input_audio_buffer.committed',
-    # 'input_audio_buffer.speech_stopped',
-    # 'input_audio_buffer.speech_started',
-    'session.created'
+    'response.output_item.done',
+    'response.audio.delta'
 ]
 
 app = FastAPI()
@@ -35,7 +33,7 @@ app = FastAPI()
 if not OPENAI_API_KEY:
     raise ValueError('Missing the OpenAI API key. Please set it in the .env file.')
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=JSONResponse)
 async def index_page():
     return {"message": "Twilio Media Stream Server is running!"}
 
@@ -44,7 +42,7 @@ async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
     response = VoiceResponse()
     # <Say> punctuation to improve text-to-speech flow
-    # response.say("Please wait while we connect your call to the A. I. voice assistant, powered by Twilio and the Open-A.I. Realtime API")
+    response.say("Please wait while we connect your call to the AI voice assistant, powered by Twilio and the Open-A.I. Realtime API")
     response.pause(length=1)
     response.say("O.K. you can start talking!")
     host = request.url.hostname
@@ -97,22 +95,10 @@ async def handle_media_stream(websocket: WebSocket):
                     response = json.loads(openai_message)
                     session_type = response.get('type')
                     print(f"-----------session type : {session_type}-------------")
-                    if session_type == 'conversation.item.created':
-                        print("Conversation item created:", response)
-                    if session_type == 'response.created':
-                        print("Response created:", response)
-                    if session_type == 'response.function_call_arguments.delta':
-                        print("Arguments delta:", response)
-                    if session_type == 'response.output_item.added':
-                        print("Output item added:", response)
-                    if session_type == 'response.output_item.done':
-                        print("Output item done:", response)
                     if session_type == 'error':
                         print(f"Received error: {response['error']}")
                     if session_type in LOG_EVENT_TYPES:
                         print(f"Received event: {session_type}", response)
-                    if session_type == 'session.updated':
-                        print("Session updated successfully:", response)
                     if session_type == 'response.audio.delta' and response.get('delta'):
                         # Audio from OpenAI
                         try:
